@@ -71,13 +71,13 @@ void onConnectedController(ControllerPtr ctl) {
           printf("flagXBOX = true\n");
           flagXBOX = true;
           flagPS4 = false;
-          steeringExpo = steeringExpoPS4;
-          ctl->setColorLED(ledRed, ledGreen, ledBlue);
       } else if (properties.vendor_id == 0x054c) {
           // Sony DualShock or DualSense
           printf("flagPS4 = true\n");
           flagXBOX = false;
           flagPS4 = true;
+          steeringExpo = steeringExpoPS4;
+          ctl->setColorLED(ledRed, ledGreen, ledBlue);
       } else {
           printf("Unknown controller");
           flagXBOX = false;
