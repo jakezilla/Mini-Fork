@@ -2,6 +2,9 @@
 #include <ESP32Servo.h>  // by Kevin Harrington
 #include <Bluepad32.h>
 
+const int mastTiltMin = 20;
+const int mastTiltMax = 120;
+
 ControllerPtr myControllers[BP32_MAX_GAMEPADS];
 
 #define steeringServoPin 23
@@ -27,7 +30,6 @@ ControllerPtr myControllers[BP32_MAX_GAMEPADS];
 Servo steeringServo;
 Servo mastTiltServo;
 
-int servoDelay = 0;
 int lightSwitchTime = 0;
 float adjustedSteeringValue = 86;
 float steeringAdjustment = 1;
@@ -39,6 +41,9 @@ bool moveMastTiltServoDown = false;
 bool moveMastTiltServoUp = false;
 bool hardLeft;
 bool hardRight;
+
+uint8_t GlobalDpadValue = 0;
+unsigned long GlobalCurrentTime = 0;
 
 void onConnectedController(ControllerPtr ctl) {
   bool foundEmptySlot = false;
@@ -85,7 +90,7 @@ void processGamepad(ControllerPtr ctl) {
   //Rasing and lowering of mast
   processMast(ctl->axisRY());
   //MastTilt
-  processMastTilt(ctl->dpad());
+  GlobalDpadValue = ctl->dpad();
   //Aux
   processAux(ctl->thumbR());
 
@@ -160,27 +165,17 @@ void processSteering(int axisRXValue) {
   }
 }
 
-void processMastTilt(int dpadValue) {
+void processMastTiltFromMain(int dpadValue) {
   if (dpadValue == 1) {
-    if (servoDelay == 4) {
-      if (mastTiltValue >= 10 && mastTiltValue < 170) {
-        //if using a ps3 controller that was flashed as an xbox360 controller change the value "1 " below to a "3" or "4" to make up for the slower movement.
-        mastTiltValue = mastTiltValue + 1;
-        mastTiltServo.write(mastTiltValue);
-      }
-      servoDelay = 0;
+    if (mastTiltValue >= mastTiltMin && mastTiltValue < mastTiltMax) {
+      mastTiltValue = mastTiltValue + 1;
+      mastTiltServo.write(mastTiltValue);
     }
-    servoDelay++;
   } else if (dpadValue == 2) {
-    if (servoDelay == 4) {
-      if (mastTiltValue <= 170 && mastTiltValue > 10) {
-        //if using a ps3 controller that was flashed as an xbox360 controller change the value "1" below to a "3" or "4" to make up for the slower movement.
-        mastTiltValue = mastTiltValue - 1;
-        mastTiltServo.write(mastTiltValue);
-      }
-      servoDelay = 0;
+    if (mastTiltValue <= mastTiltMax && mastTiltValue > mastTiltMin) {
+      mastTiltValue = mastTiltValue - 1;
+      mastTiltServo.write(mastTiltValue);
     }
-    servoDelay++;
   }
 }
 void processAux(bool buttonValue) {
@@ -275,18 +270,33 @@ void setup() {
 
 // Arduino loop function. Runs in CPU 1.
 void loop() {
+  GlobalCurrentTime = millis();
+
   // This call fetches all the controllers' data.
   // Call this function in your main loop.
   bool dataUpdated = BP32.update();
   if (dataUpdated) {
     processControllers();
   }
+  
+  // Different controllers send data at different times, 
+  // so removing dependency on controller updates means more consistant mast movement
+  // For instance, XBOX One controllers do not send constant updates, they only send when they have new data
+  // this means if you hold a direction, you will only get 1 movement.
+  // Other controllers may send at 60Hz, or others at 135Hz!
+  if (GlobalDpadValue != 0) {
+    static unsigned long lastTiltTime = 0;
+    const unsigned long tiltInterval = 100; // milliseconds between calls
+    if (GlobalCurrentTime - lastTiltTime >= tiltInterval) {
+      processMastTiltFromMain(GlobalDpadValue);
+      lastTiltTime = GlobalCurrentTime;
+    }
+  }
+
   // The main loop must have some kind of "yield to lower priority task" event.
   // Otherwise, the watchdog will get triggered.
   // If your main loop doesn't have one, just add a simple `vTaskDelay(1)`.
   // Detailed info here:
   // https://stackoverflow.com/questions/66278271/task-watchdog-got-triggered-the-tasks-did-not-reset-the-watchdog-in-time
-
-  //     vTaskDelay(1);
-  else { vTaskDelay(1); }
+  vTaskDelay(1);
 }
