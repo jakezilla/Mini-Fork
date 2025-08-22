@@ -1,9 +1,11 @@
 #include <Arduino.h>
-#include <ESP32Servo.h>  // by Kevin Harrington
+#include <ESP32Servo.h>  // by Kevin Harrington !!!!!MUST USE 3.0.7!!!!!
 #include <Bluepad32.h>
 
-const int mastTiltMin = 20;
-const int mastTiltMax = 120;
+// Values that may need to be adjusted between vehicles
+const uint mastTiltMinUS = 1050;  // Minimum pulse width (e.g., fully back)
+const int mastTiltMaxUS = 1900;  // Maximum pulse width (e.g., fully forward)
+int mastTiltValueUS = 1500;      // Starting midpoint
 
 ControllerPtr myControllers[BP32_MAX_GAMEPADS];
 
@@ -34,16 +36,13 @@ int lightSwitchTime = 0;
 float adjustedSteeringValue = 86;
 float steeringAdjustment = 1;
 int steeringTrim = 0;
-int mastTiltValue = 90;
 
 bool lightsOn = false;
-bool moveMastTiltServoDown = false;
-bool moveMastTiltServoUp = false;
 bool hardLeft;
 bool hardRight;
 
 uint8_t GlobalDpadValue = 0;
-unsigned long GlobalCurrentTime = 0;
+unsigned long GlobalCurrentTimeMS = 0;
 
 void onConnectedController(ControllerPtr ctl) {
   bool foundEmptySlot = false;
@@ -164,19 +163,42 @@ void processSteering(int axisRXValue) {
     steeringAdjustment = ((200 - (90 + (90 - adjustedSteeringValue))) / 100);
   }
 }
-
 void processMastTiltFromMain(int dpadValue) {
-  if (dpadValue == 1) {
-    if (mastTiltValue >= mastTiltMin && mastTiltValue < mastTiltMax) {
-      mastTiltValue = mastTiltValue + 1;
-      mastTiltServo.write(mastTiltValue);
+  static bool initialPress = true;
+  const int initialMastTiltStepUS = 30;
+  const unsigned long initialPressDelayMS = 333;
+  static unsigned long lastInitialTiltTimeMS = 0;
+  const int mastTiltStepUS = 5;
+  const unsigned long tiltIntervalMS = 20; // using 50Hz servos, max speed here
+  static unsigned long lastTiltTimeMS = 0;
+  if (dpadValue != 0) {
+    if (initialPress) {
+      initialPress = false;
+      if (dpadValue == 1 && mastTiltValueUS < mastTiltMaxUS) {
+        mastTiltValueUS += initialMastTiltStepUS;
+        mastTiltServo.writeMicroseconds(mastTiltValueUS);
+      } else if (dpadValue == 2 && mastTiltValueUS > mastTiltMinUS) {
+        mastTiltValueUS -= initialMastTiltStepUS;
+        mastTiltServo.writeMicroseconds(mastTiltValueUS);
+      }
+      //Serial.println("initialPress"); // uncomment if testing servo range
+      //Serial.println(mastTiltServo.readMicroseconds()); // uncomment if testing servo range
+      lastInitialTiltTimeMS = GlobalCurrentTimeMS;
     }
-  } else if (dpadValue == 2) {
-    if (mastTiltValue <= mastTiltMax && mastTiltValue > mastTiltMin) {
-      mastTiltValue = mastTiltValue - 1;
-      mastTiltServo.write(mastTiltValue);
+    else if (GlobalCurrentTimeMS - lastInitialTiltTimeMS >= initialPressDelayMS) {
+      if (GlobalCurrentTimeMS - lastTiltTimeMS >= tiltIntervalMS) {
+        if (dpadValue == 1 && mastTiltValueUS < mastTiltMaxUS) {
+          mastTiltValueUS += mastTiltStepUS;
+          mastTiltServo.writeMicroseconds(mastTiltValueUS);
+        } else if (dpadValue == 2 && mastTiltValueUS > mastTiltMinUS) {
+          mastTiltValueUS -= mastTiltStepUS;
+          mastTiltServo.writeMicroseconds(mastTiltValueUS);
+        }
+        //Serial.println(mastTiltServo.readMicroseconds()); // uncomment if testing servo range
+        lastTiltTimeMS = GlobalCurrentTimeMS;
+      }
     }
-  }
+  } else initialPress = true;
 }
 void processAux(bool buttonValue) {
   if (buttonValue && (millis() - lightSwitchTime) > 200) {
@@ -234,7 +256,7 @@ void setup() {
   steeringServo.attach(steeringServoPin);
   steeringServo.write(adjustedSteeringValue);
   mastTiltServo.attach(mastTiltServoPin);
-  mastTiltServo.write(mastTiltValue);
+  mastTiltServo.writeMicroseconds(mastTiltValueUS);
 
   Serial.begin(115200);
   //   put your setup code here, to run once:
@@ -270,7 +292,7 @@ void setup() {
 
 // Arduino loop function. Runs in CPU 1.
 void loop() {
-  GlobalCurrentTime = millis();
+  GlobalCurrentTimeMS = millis();
 
   // This call fetches all the controllers' data.
   // Call this function in your main loop.
@@ -284,14 +306,7 @@ void loop() {
   // For instance, XBOX One controllers do not send constant updates, they only send when they have new data
   // this means if you hold a direction, you will only get 1 movement.
   // Other controllers may send at 60Hz, or others at 135Hz!
-  if (GlobalDpadValue != 0) {
-    static unsigned long lastTiltTime = 0;
-    const unsigned long tiltInterval = 100; // milliseconds between calls
-    if (GlobalCurrentTime - lastTiltTime >= tiltInterval) {
-      processMastTiltFromMain(GlobalDpadValue);
-      lastTiltTime = GlobalCurrentTime;
-    }
-  }
+  processMastTiltFromMain(GlobalDpadValue);
 
   // The main loop must have some kind of "yield to lower priority task" event.
   // Otherwise, the watchdog will get triggered.
