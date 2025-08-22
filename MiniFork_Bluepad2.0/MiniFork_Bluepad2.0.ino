@@ -4,15 +4,23 @@
 
 #include <ArduinoController.h> // setColorLED()
 
+
 // Values that may need to be adjusted between vehicles/controllers
+// LED colors config values for PS4
 const uint8_t ledRed = 0;
 const uint8_t ledGreen = 255; // green LED for example
 const uint8_t ledBlue = 0;
+// mast tilt servo config values
 const uint mastTiltMinUS = 1050;  // Minimum pulse width (e.g., fully back)
 const int mastTiltMaxUS = 1900;  // Maximum pulse width (e.g., fully forward)
 int mastTiltValueUS = 1500;      // Starting midpoint
-float steeringExpo = 1.0; // default steering expo
-const float steeringExpoPS4 = 2.0; // expo for cheap PS4 controllers
+// steering config values
+float steeringExpo = 1.0; // default steering expo (see onConnectedController for custom config)
+// throttle config values
+const float throttleDeadband = 40.0;
+float throttleExpoFullSpeed = 1.0; // default throttle expo (see onConnectedController for custom config)
+float throttleExpoHalfSpeed = 0.6; // default throttle expo (see onConnectedController for custom config)
+
 
 ControllerPtr myControllers[BP32_MAX_GAMEPADS];
 
@@ -51,6 +59,9 @@ bool hardRight;
 bool flagXBOX = false;
 bool flagPS4 = false;
 
+bool ledOn = false;
+bool flagHalfSpeed = false;
+
 int32_t GlobalAxisRXValue = 0;
 uint8_t GlobalDpadValue = 0;
 unsigned long GlobalCurrentTimeMS = 0;
@@ -76,7 +87,9 @@ void onConnectedController(ControllerPtr ctl) {
           printf("flagPS4 = true\n");
           flagXBOX = false;
           flagPS4 = true;
-          steeringExpo = steeringExpoPS4;
+          steeringExpo = 2.0; // expo for cheap PS4 controllers
+          throttleExpoFullSpeed = 0.9; // expo for cheap PS4 controllers
+          throttleExpoHalfSpeed = 0.4; // expo for cheap PS4 controllers
           ctl->setColorLED(ledRed, ledGreen, ledBlue);
       } else {
           printf("Unknown controller");
@@ -137,11 +150,54 @@ void processGamepad(ControllerPtr ctl) {
   } else {
     hardRight = false;
   }
+
+  // A button to toggle half speed
+  static bool aButtonLastState = false;
+  bool aCurrent = ctl->a();
+  if (aCurrent && !aButtonLastState) {
+    flagHalfSpeed = !flagHalfSpeed;
+    if(flagHalfSpeed){
+      Serial.println("half speed");
+      ledOn = true;
+      ctl->playDualRumble(0, 500, 0x00, 0xFF); // we are slow so play a long, strong (low freq) rumble
+    } else {
+      Serial.println("full speed");
+      ctl->setColorLED(ledRed, ledGreen, ledBlue);
+      ctl->playDualRumble(0, 200, 0xFF, 0x00); // we are fast so play a fast, weak (high freq) rumble
+    }
+  }
+  aButtonLastState = aCurrent;
+  // if we have a dual shock, flash the LED slow in half speed
+  if (flagPS4 && flagHalfSpeed) {
+    static int32_t blinkInterval = 1;
+    static unsigned long lastLedToggleTime = 0;
+    if (GlobalCurrentTimeMS - lastLedToggleTime >= blinkInterval) {
+      lastLedToggleTime = GlobalCurrentTimeMS;
+      ledOn = !ledOn;
+      if (ledOn) {
+        ctl->setColorLED(ledRed, ledGreen, ledBlue);
+        blinkInterval = 1000;
+      } else {
+        ctl->setColorLED(0, 0, 0);
+        blinkInterval = 500;
+      }
+    }
+  }
 }
 
 void processThrottle(int axisYValue) {
-  float adjustedThrottleValue = axisYValue / 2;
-  if (adjustedThrottleValue > 15 || adjustedThrottleValue < -15) {
+  float normalized = axisYValue / 512.0;
+  float curved = 0;
+  float adjustedThrottleValue = 0;
+  if (flagHalfSpeed) {
+    curved = normalized * pow(fabs(normalized), throttleExpoHalfSpeed - 1);  // Preserves sign
+    adjustedThrottleValue = curved * 128;
+  } else {
+    curved = normalized * pow(fabs(normalized), throttleExpoFullSpeed - 1);  // Preserves sign
+    adjustedThrottleValue = curved * 256;
+  }
+  
+  if (fabs(adjustedThrottleValue) > throttleDeadband) {
     if (hardRight) {
       moveMotor(rightMotor0, rightMotor1, -1 * (adjustedThrottleValue * steeringAdjustment));
     } else if (hardLeft) {
