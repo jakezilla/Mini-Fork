@@ -41,6 +41,9 @@ bool lightsOn = false;
 bool hardLeft;
 bool hardRight;
 
+bool flagXBOX = false;
+bool flagPS4 = false;
+
 uint8_t GlobalDpadValue = 0;
 unsigned long GlobalCurrentTimeMS = 0;
 
@@ -54,6 +57,23 @@ void onConnectedController(ControllerPtr ctl) {
       ControllerProperties properties = ctl->getProperties();
       Serial.printf("Controller model: %s, VID=0x%04x, PID=0x%04x\n", ctl->getModelName().c_str(), properties.vendor_id,
                     properties.product_id);
+                    
+      if (properties.vendor_id == 0x045e) {
+          // Microsoft Xbox controller
+          printf("flagXBOX = true\n");
+          flagXBOX = true;
+          flagPS4 = false;
+      } else if (properties.vendor_id == 0x054c) {
+          // Sony DualShock or DualSense
+          printf("flagPS4 = true\n");
+          flagXBOX = false;
+          flagPS4 = true;
+      } else {
+          printf("Unknown controller");
+          flagXBOX = false;
+          flagPS4 = false;
+      }
+
       myControllers[i] = ctl;
       foundEmptySlot = true;
       break;
