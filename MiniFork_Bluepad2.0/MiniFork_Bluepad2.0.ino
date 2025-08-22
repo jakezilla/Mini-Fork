@@ -2,7 +2,12 @@
 #include <ESP32Servo.h>  // by Kevin Harrington !!!!!MUST USE 3.0.7!!!!!
 #include <Bluepad32.h>
 
+#include <ArduinoController.h> // setColorLED()
+
 // Values that may need to be adjusted between vehicles
+const uint8_t ledRed = 0;
+const uint8_t ledGreen = 255; // green LED for example
+const uint8_t ledBlue = 0;
 const uint mastTiltMinUS = 1050;  // Minimum pulse width (e.g., fully back)
 const int mastTiltMaxUS = 1900;  // Maximum pulse width (e.g., fully forward)
 int mastTiltValueUS = 1500;      // Starting midpoint
@@ -21,7 +26,7 @@ ControllerPtr myControllers[BP32_MAX_GAMEPADS];
 
 #define leftMotor0 21   // Used for controlling the left motor movement
 #define leftMotor1 19   // Used for controlling the left motor movement
-#define rightMotor0 33  // Used for controlling the right motor movementc:\Users\JohnC\Desktop\SOLIDWORKS Connected.lnk
+#define rightMotor0 33  // Used for controlling the right motor movement
 #define rightMotor1 32  // Used for controlling the right motor movement
 
 
@@ -63,6 +68,7 @@ void onConnectedController(ControllerPtr ctl) {
           printf("flagXBOX = true\n");
           flagXBOX = true;
           flagPS4 = false;
+          ctl->setColorLED(ledRed, ledGreen, ledBlue);
       } else if (properties.vendor_id == 0x054c) {
           // Sony DualShock or DualSense
           printf("flagPS4 = true\n");
