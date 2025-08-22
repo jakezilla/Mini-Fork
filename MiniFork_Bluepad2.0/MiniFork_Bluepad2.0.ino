@@ -4,13 +4,15 @@
 
 #include <ArduinoController.h> // setColorLED()
 
-// Values that may need to be adjusted between vehicles
+// Values that may need to be adjusted between vehicles/controllers
 const uint8_t ledRed = 0;
 const uint8_t ledGreen = 255; // green LED for example
 const uint8_t ledBlue = 0;
 const uint mastTiltMinUS = 1050;  // Minimum pulse width (e.g., fully back)
 const int mastTiltMaxUS = 1900;  // Maximum pulse width (e.g., fully forward)
 int mastTiltValueUS = 1500;      // Starting midpoint
+float steeringExpo = 1.0; // default steering expo
+const float steeringExpoPS4 = 2.0; // expo for cheap PS4 controllers
 
 ControllerPtr myControllers[BP32_MAX_GAMEPADS];
 
@@ -49,6 +51,7 @@ bool hardRight;
 bool flagXBOX = false;
 bool flagPS4 = false;
 
+int32_t GlobalAxisRXValue = 0;
 uint8_t GlobalDpadValue = 0;
 unsigned long GlobalCurrentTimeMS = 0;
 
@@ -68,6 +71,7 @@ void onConnectedController(ControllerPtr ctl) {
           printf("flagXBOX = true\n");
           flagXBOX = true;
           flagPS4 = false;
+          steeringExpo = steeringExpoPS4;
           ctl->setColorLED(ledRed, ledGreen, ledBlue);
       } else if (properties.vendor_id == 0x054c) {
           // Sony DualShock or DualSense
@@ -112,6 +116,7 @@ void processGamepad(ControllerPtr ctl) {
   processThrottle(ctl->axisY());
   //Steering
   processSteering(ctl->axisRX());
+  GlobalAxisRXValue = ctl->axisRX();
   //Rasing and lowering of mast
   processMast(ctl->axisRY());
   //MastTilt
@@ -189,7 +194,23 @@ void processSteering(int axisRXValue) {
     steeringAdjustment = ((200 - (90 + (90 - adjustedSteeringValue))) / 100);
   }
 }
-void processMastTiltFromMain(int dpadValue) {
+void controlSteeringServo(int32_t axisRXValue) {
+  const unsigned long steeringIntervalMS = 20; // using 50Hz servos, max speed here
+  static unsigned long lastSteeringTimeMS = 0;
+  if (GlobalCurrentTimeMS - lastSteeringTimeMS >= steeringIntervalMS) {
+    float normalized = axisRXValue / 512.0;  // Range: -1.0 to +1.0
+    float curved = normalized * pow(fabs(normalized), steeringExpo - 1);
+    steeringServo.write((90 - (int)(curved * 55)) - steeringTrim);
+    lastSteeringTimeMS = GlobalCurrentTimeMS;
+  }
+}
+
+// Different controllers send data at different times, 
+// so removing dependency on controller updates means more consistant mast movement
+// For instance, XBOX One controllers do not send constant updates, they only send when they have new data
+// this means if you hold a direction, you will only get 1 movement.
+// Other controllers may send at 60Hz, or others at 135Hz!
+void controlMastTiltServo(int dpadValue) {
   static bool initialPress = true;
   const int initialMastTiltStepUS = 30;
   const unsigned long initialPressDelayMS = 333;
@@ -327,12 +348,9 @@ void loop() {
     processControllers();
   }
   
-  // Different controllers send data at different times, 
-  // so removing dependency on controller updates means more consistant mast movement
-  // For instance, XBOX One controllers do not send constant updates, they only send when they have new data
-  // this means if you hold a direction, you will only get 1 movement.
-  // Other controllers may send at 60Hz, or others at 135Hz!
-  processMastTiltFromMain(GlobalDpadValue);
+  // control servos with a steady timebase instead of on controller updates
+  controlMastTiltServo(GlobalDpadValue);
+  controlSteeringServo(GlobalAxisRXValue);
 
   // The main loop must have some kind of "yield to lower priority task" event.
   // Otherwise, the watchdog will get triggered.
