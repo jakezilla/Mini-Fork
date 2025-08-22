@@ -171,17 +171,19 @@ void processMast(int axisRYValue) {
   }
 }
 void processTrimRight(int trimValue) {
-  if (trimValue == 1 && trimValue < 20) {
+  static int previousTrimValue = 0;
+  if (trimValue == 1 && previousTrimValue == 0 && trimValue < 20) {
     steeringTrim = steeringTrim + 2;
-    delay(50);
   }
+  previousTrimValue = trimValue;
 }
 
 void processTrimLeft(int trimValue) {
-  if (trimValue == 1 && trimValue > -20) {
+  static int previousTrimValue = 0;
+  if (trimValue == 1 && previousTrimValue == 0 && trimValue > -20) {
     steeringTrim = steeringTrim - 2;
-    delay(50);
   }
+  previousTrimValue = trimValue;
 }
 
 void processSteering(int axisRXValue) {
