@@ -14,10 +14,13 @@ const uint8_t ledBlue = 0;
 const uint mastTiltMinUS = 1050;  // Minimum pulse width (e.g., fully back)
 const int mastTiltMaxUS = 1900;  // Maximum pulse width (e.g., fully forward)
 int mastTiltValueUS = 1500;      // Starting midpoint
+// mast config values
+const int mastDeadband = 20;
+float mastExpo = 1.0; // default mast expo (see onConnectedController for custom config)
 // steering config values
 float steeringExpo = 1.0; // default steering expo (see onConnectedController for custom config)
 // throttle config values
-const float throttleDeadband = 40.0;
+const int throttleDeadband = 40;
 float throttleExpoFullSpeed = 1.0; // default throttle expo (see onConnectedController for custom config)
 float throttleExpoHalfSpeed = 0.6; // default throttle expo (see onConnectedController for custom config)
 
@@ -90,6 +93,7 @@ void onConnectedController(ControllerPtr ctl) {
           steeringExpo = 2.0; // expo for cheap PS4 controllers
           throttleExpoFullSpeed = 0.9; // expo for cheap PS4 controllers
           throttleExpoHalfSpeed = 0.4; // expo for cheap PS4 controllers
+          mastExpo = 1.0; // expo for cheap PS4 controllers
           ctl->setColorLED(ledRed, ledGreen, ledBlue);
       } else {
           printf("Unknown controller");
@@ -188,14 +192,21 @@ void processGamepad(ControllerPtr ctl) {
 void processThrottle(int axisYValue) {
   float normalized = axisYValue / 512.0;
   float curved = 0;
-  float adjustedThrottleValue = 0;
-  if (flagHalfSpeed) {
+  int adjustedThrottleValue = 0;
+  if (axisYValue == 0) {
+    adjustedThrottleValue = 0; // catch weird expo math when input is 0
+  } else if (flagHalfSpeed) {
     curved = normalized * pow(fabs(normalized), throttleExpoHalfSpeed - 1);  // Preserves sign
     adjustedThrottleValue = curved * 128;
   } else {
     curved = normalized * pow(fabs(normalized), throttleExpoFullSpeed - 1);  // Preserves sign
     adjustedThrottleValue = curved * 256;
   }
+
+  // uncomment for expo and deadband testing
+  //Serial.print(axisYValue);
+  //Serial.print(",");
+  //Serial.println(adjustedThrottleValue);
   
   if (fabs(adjustedThrottleValue) > throttleDeadband) {
     if (hardRight) {
@@ -219,8 +230,19 @@ void processThrottle(int axisYValue) {
 }
 
 void processMast(int axisRYValue) {
-  int adjustedMastValue = axisRYValue / 2;
-  if (adjustedMastValue > 100 || adjustedMastValue < -100) {
+  float normalized = axisRYValue / 512.0;
+  float curved = normalized * pow(fabs(normalized), mastExpo - 1);  // Preserves sign
+  int adjustedMastValue = curved * 256;
+  if (axisRYValue == 0) {
+    adjustedMastValue = 0; // catch weird expo math when input is 0
+  }
+
+  // uncomment for expo and deadband testing
+  //Serial.print(axisRYValue);
+  //Serial.print(",");
+  //Serial.println(adjustedMastValue);
+
+  if (fabs(adjustedMastValue) > mastDeadband) {
     moveMotor(mastMotor0, mastMotor1, adjustedMastValue);
   } else {
     moveMotor(mastMotor0, mastMotor1, 0);
@@ -244,7 +266,6 @@ void processTrimLeft(int trimValue) {
 
 void processSteering(int axisRXValue) {
   adjustedSteeringValue = (90 - (axisRXValue / 9));
-  steeringServo.write(adjustedSteeringValue - steeringTrim);
 
   if (adjustedSteeringValue > 100) {
     steeringAdjustment = ((200 - adjustedSteeringValue) / 100);
