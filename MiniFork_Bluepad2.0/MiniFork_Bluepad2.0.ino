@@ -3,6 +3,8 @@
 #include <Bluepad32.h>
 
 #include <ArduinoController.h> // setColorLED()
+#include <Preferences.h>
+Preferences preferences;
 
 
 // Values that may need to be adjusted between vehicles/controllers
@@ -57,6 +59,7 @@ int lightSwitchTime = 0;
 float adjustedSteeringValue = 86;
 float steeringAdjustment = 1;
 int steeringTrim = 0;
+const int steeringTrimMax = 24;
 
 bool lightsOn = false;
 bool hardLeft;
@@ -272,18 +275,21 @@ void processMast(int axisRYValue) {
     moveMotor(mastMotor0, mastMotor1, 0);
   }
 }
+
 void processTrimRight(int trimValue) {
   static int previousTrimValue = 0;
-  if (trimValue == 1 && previousTrimValue == 0 && trimValue < 20) {
-    steeringTrim = steeringTrim + 2;
+  if (trimValue == 1 && previousTrimValue == 0 && steeringTrim < steeringTrimMax) {
+    steeringTrim += 2;
+    preferences.putInt("steeringTrim", steeringTrim); // Save to flash
   }
   previousTrimValue = trimValue;
 }
 
 void processTrimLeft(int trimValue) {
   static int previousTrimValue = 0;
-  if (trimValue == 1 && previousTrimValue == 0 && trimValue > -20) {
-    steeringTrim = steeringTrim - 2;
+  if (trimValue == 1 && previousTrimValue == 0 && steeringTrim > -steeringTrimMax) {
+    steeringTrim -= 2;
+    preferences.putInt("steeringTrim", steeringTrim); // Save to flash
   }
   previousTrimValue = trimValue;
 }
@@ -436,6 +442,12 @@ void setup() {
   pinMode(rightMotor0, OUTPUT);
   pinMode(rightMotor1, OUTPUT);
 
+  preferences.begin("fork", false); // Namespace "fork", RW mode
+  steeringTrim = preferences.getInt("steeringTrim", 0); // Default to 0 if not set
+  if (steeringTrim < -steeringTrimMax || steeringTrim > steeringTrimMax) {
+    steeringTrim = 0;
+    preferences.putInt("steeringTrim", steeringTrim); // Reset in flash
+  }
 
   steeringServo.attach(steeringServoPin);
   steeringServo.write(adjustedSteeringValue);
