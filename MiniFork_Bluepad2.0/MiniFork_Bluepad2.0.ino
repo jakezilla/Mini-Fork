@@ -23,6 +23,8 @@ float steeringExpo = 1.0; // default steering expo (see onConnectedController fo
 const int throttleDeadband = 40;
 float throttleExpoFullSpeed = 1.0; // default throttle expo (see onConnectedController for custom config)
 float throttleExpoHalfSpeed = 0.6; // default throttle expo (see onConnectedController for custom config)
+// has battery monitor mod?
+const bool batteryMonitor = false;
 
 
 ControllerPtr myControllers[BP32_MAX_GAMEPADS];
@@ -42,6 +44,7 @@ ControllerPtr myControllers[BP32_MAX_GAMEPADS];
 #define rightMotor0 33  // Used for controlling the right motor movement
 #define rightMotor1 32  // Used for controlling the right motor movement
 
+#define battPin 34  // Used for Battery Monitor Mod 100k/51k
 
 #define FORWARD 1
 #define BACKWARD -1
@@ -68,6 +71,9 @@ bool flagHalfSpeed = false;
 int32_t GlobalAxisRXValue = 0;
 uint8_t GlobalDpadValue = 0;
 unsigned long GlobalCurrentTimeMS = 0;
+
+float cellVoltage = 0.0;
+bool flagLowVoltage = false;
 
 void onConnectedController(ControllerPtr ctl) {
   bool foundEmptySlot = false;
@@ -129,52 +135,70 @@ void onDisconnectedController(ControllerPtr ctl) {
 }
 
 void processGamepad(ControllerPtr ctl) {
-  //Throttle
-  processThrottle(ctl->axisY());
-  //Steering
-  processSteering(ctl->axisRX());
-  GlobalAxisRXValue = ctl->axisRX();
-  //Rasing and lowering of mast
-  processMast(ctl->axisRY());
-  //MastTilt
-  GlobalDpadValue = ctl->dpad();
-  //Aux
-  processAux(ctl->thumbR());
+  if(!flagLowVoltage) {
+    //Throttle
+    processThrottle(ctl->axisY());
+    //Steering
+    processSteering(ctl->axisRX());
+    GlobalAxisRXValue = ctl->axisRX();
+    //Rasing and lowering of mast
+    processMast(ctl->axisRY());
+    //MastTilt
+    GlobalDpadValue = ctl->dpad();
+    //Aux
+    processAux(ctl->thumbR());
 
-  processTrimRight(ctl->r1());
-  processTrimLeft(ctl->l1());
+    processTrimRight(ctl->r1());
+    processTrimLeft(ctl->l1());
 
-  if (ctl->l2()) {
-    hardLeft = true;
-  } else {
-    hardLeft = false;
-  }
-  if (ctl->r2()) {
-    hardRight = true;
-  } else {
-    hardRight = false;
-  }
-
-  // A button to toggle half speed
-  static bool aButtonLastState = false;
-  bool aCurrent = ctl->a();
-  if (aCurrent && !aButtonLastState) {
-    flagHalfSpeed = !flagHalfSpeed;
-    if(flagHalfSpeed){
-      Serial.println("half speed");
-      ledOn = true;
-      ctl->playDualRumble(0, 500, 0x00, 0xFF); // we are slow so play a long, strong (low freq) rumble
+    if (ctl->l2()) {
+      hardLeft = true;
     } else {
-      Serial.println("full speed");
-      ctl->setColorLED(ledRed, ledGreen, ledBlue);
-      ctl->playDualRumble(0, 200, 0xFF, 0x00); // we are fast so play a fast, weak (high freq) rumble
+      hardLeft = false;
+    }
+    if (ctl->r2()) {
+      hardRight = true;
+    } else {
+      hardRight = false;
+    }
+
+    // A button to toggle half speed
+    static bool aButtonLastState = false;
+    bool aCurrent = ctl->a();
+    if (aCurrent && !aButtonLastState) {
+      flagHalfSpeed = !flagHalfSpeed;
+      if(flagHalfSpeed){
+        Serial.println("half speed");
+        ledOn = true;
+        ctl->playDualRumble(0, 500, 0x00, 0xFF); // we are slow so play a long, strong (low freq) rumble
+      } else {
+        Serial.println("full speed");
+        ctl->setColorLED(ledRed, ledGreen, ledBlue);
+        ctl->playDualRumble(0, 200, 0xFF, 0x00); // we are fast so play a fast, weak (high freq) rumble
+      }
+    }
+    aButtonLastState = aCurrent;
+  }
+
+  // control controller LED (if it has one)
+  static int32_t blinkInterval = 1;
+  static unsigned long lastLedToggleTime = 0;
+  // low voltage, flash red/yellow like crazy
+  if (flagPS4 && flagLowVoltage) {
+    if (GlobalCurrentTimeMS - lastLedToggleTime >= blinkInterval) {
+      lastLedToggleTime = GlobalCurrentTimeMS;
+      ledOn = !ledOn;
+      if (ledOn) {
+        ctl->setColorLED(255, 255, 0);
+        blinkInterval = 100;
+      } else {
+        ctl->setColorLED(255, 0, 0);
+        blinkInterval = 100;
+      }
     }
   }
-  aButtonLastState = aCurrent;
-  // if we have a dual shock, flash the LED slow in half speed
-  if (flagPS4 && flagHalfSpeed) {
-    static int32_t blinkInterval = 1;
-    static unsigned long lastLedToggleTime = 0;
+  // half speed, slow blink between off (some controllers goes white) and the config'd main color
+  else if (flagPS4 && flagHalfSpeed) {
     if (GlobalCurrentTimeMS - lastLedToggleTime >= blinkInterval) {
       lastLedToggleTime = GlobalCurrentTimeMS;
       ledOn = !ledOn;
@@ -365,6 +389,40 @@ void processControllers() {
   }
 }
 
+void updateBatteryStatus() {
+  const int numSamples = 10;
+  const float adcMax = 4095.0;
+  const float vRef = 3.3;
+  const float dividerScale = (100.0 + 51.0) / 51.0; // ≈ 2.96
+  const float cutoffVoltage = 6.2;
+  const int lowVoltageThreshold = 5; // number of consecutive low readings
+
+  static int lowVoltageCount = 0;
+  unsigned long adcSum = 0;
+  for (int i = 0; i < numSamples; i++) {
+    adcSum += analogRead(battPin);
+    delay(2); // optional smoothing
+  }
+
+  float avgAdc = adcSum / float(numSamples);
+  float measuredVoltage = (avgAdc / adcMax) * vRef * dividerScale;
+  cellVoltage = measuredVoltage;
+
+  if (cellVoltage < cutoffVoltage) {
+    lowVoltageCount++;
+    if (lowVoltageCount >= lowVoltageThreshold) {
+      flagLowVoltage = true;
+      GlobalAxisRXValue = 0;
+      steeringServo.write(90);
+      GlobalDpadValue = 0;
+      mastTiltServo.write(90);
+      moveMotor(leftMotor0, leftMotor1, 0);
+      moveMotor(rightMotor0, rightMotor1, 0);
+      moveMotor(mastMotor0, mastMotor1, 0);
+    }
+  }
+}
+
 // Arduino setup function. Runs in CPU 1
 void setup() {
   pinMode(mastMotor0, OUTPUT);
@@ -414,8 +472,6 @@ void setup() {
   // running with limited functionality.
 }
 
-
-
 // Arduino loop function. Runs in CPU 1.
 void loop() {
   GlobalCurrentTimeMS = millis();
@@ -430,6 +486,16 @@ void loop() {
   // control servos with a steady timebase instead of on controller updates
   controlMastTiltServo(GlobalDpadValue);
   controlSteeringServo(GlobalAxisRXValue);
+
+  // measure battery voltage and LVC if too low
+  if (batteryMonitor) {
+    static unsigned long lastBatteryCheckMS = 0;
+    const unsigned long batteryIntervalMS = 500; // milliseconds
+    if (GlobalCurrentTimeMS - lastBatteryCheckMS >= batteryIntervalMS) {
+      lastBatteryCheckMS = GlobalCurrentTimeMS;
+      updateBatteryStatus();
+    }
+  }
 
   // The main loop must have some kind of "yield to lower priority task" event.
   // Otherwise, the watchdog will get triggered.
