@@ -50,3 +50,29 @@ I’ve also made and collected several modifications to the 3D printed parts to 
 
 - **Fender Mods (WDR)**  
   Includes **WDR’s** fender modifications for improved rear tire clearance and a more aggressive stance.
+
+---
+
+  ## 🚧 Possible Future Ideas
+
+
+###  Low Voltage Monitoring
+- Integrate battery voltage sensing with ADC averaging and debounce logic.
+  
+###  FlySky iBUS Support
+- Add support for FlySky transmitters via iBUS interface.
+
+###  PCB Improvements
+- **RX2/TX2 Header Access**  
+  Add labeled header pins for RX2 and TX2 on the ESP32 to simplify serial debugging or telemetry modules.
+
+- **Motor Connection Pads**  
+  Include large solder pads with anchor vias as an alternative to screw terminals — ideal for high-current motor leads or compact builds.
+
+- **Header Pin Spacing**  
+  Move header pins closer together to make hand-soldering easier and reduce board footprint.
+
+---
+
+If you’ve got ideas, mods, or feedback — feel free to reach out or fork and experiment.
+
