@@ -46,7 +46,7 @@ ControllerPtr myControllers[BP32_MAX_GAMEPADS];
 #define rightMotor0 33  // Used for controlling the right motor movement
 #define rightMotor1 32  // Used for controlling the right motor movement
 
-#define battPin 34  // Used for Battery Monitor Mod 100k/51k
+#define battPin A0  // Used for Battery Monitor Mod 220k/100k
 
 #define FORWARD 1
 #define BACKWARD -1
@@ -396,35 +396,34 @@ void processControllers() {
 }
 
 void updateBatteryStatus() {
-  const int numSamples = 10;
-  const float adcMax = 4095.0;
-  const float vRef = 3.3;
-  const float dividerScale = (100.0 + 51.0) / 51.0; // ≈ 2.96
-  const float cutoffVoltage = 6.2;
-  const int lowVoltageThreshold = 5; // number of consecutive low readings
-
-  static int lowVoltageCount = 0;
+  const int numSamples = 8;
   unsigned long adcSum = 0;
   for (int i = 0; i < numSamples; i++) {
     adcSum += analogRead(battPin);
     delay(2); // optional smoothing
   }
 
-  float avgAdc = adcSum / float(numSamples);
-  float measuredVoltage = (avgAdc / adcMax) * vRef * dividerScale;
-  cellVoltage = measuredVoltage;
-
-  if (cellVoltage < cutoffVoltage) {
+  int batteryVoltsMV = ((adcSum * 308) / 1000) + 690;
+  //Serial.println(batteryVoltsMV);
+ 
+  const int lowVoltageThreshold = 5; // number of consecutive low readings
+  const int cutoffVoltageMV = 6200;
+  static int lowVoltageCount = 0;
+  if (batteryVoltsMV < cutoffVoltageMV) {
     lowVoltageCount++;
+    Serial.println("LOW VOLTAGE");
     if (lowVoltageCount >= lowVoltageThreshold) {
+      Serial.println("CUTOFF");
+      if(!flagLowVoltage) {
+        GlobalAxisRXValue = 0;
+        steeringServo.write(90);
+        GlobalDpadValue = 0;
+        mastTiltServo.write(90);
+        moveMotor(leftMotor0, leftMotor1, 0);
+        moveMotor(rightMotor0, rightMotor1, 0);
+        moveMotor(mastMotor0, mastMotor1, 0);
+      }
       flagLowVoltage = true;
-      GlobalAxisRXValue = 0;
-      steeringServo.write(90);
-      GlobalDpadValue = 0;
-      mastTiltServo.write(90);
-      moveMotor(leftMotor0, leftMotor1, 0);
-      moveMotor(rightMotor0, rightMotor1, 0);
-      moveMotor(mastMotor0, mastMotor1, 0);
     }
   }
 }
